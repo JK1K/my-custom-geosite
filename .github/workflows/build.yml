@@ -1,11 +1,10 @@
-name: Build Custom Geosite
+name: Build Custom Dat Files
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 5 * * 4'
 
-# Explicitly grant write permission to the token
 permissions:
   contents: write
 
@@ -13,26 +12,29 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout upstream v2fly/domain-list-community
-        uses: actions/checkout@v4
-        with:
-          repository: v2fly/domain-list-community
-          path: ./source
-
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
 
-      - name: Prepare Data and Resolve Dependencies
+      # =========================================================
+      # 1. BUILD GEOSITE.DAT
+      # =========================================================
+      - name: Checkout v2fly/domain-list-community
+        uses: actions/checkout@v4
+        with:
+          repository: v2fly/domain-list-community
+          path: ./geosite-src
+
+      - name: Prepare Geosite Data
         run: |
-          mkdir -p ./data-temp
+          mkdir -p ./geosite-src/data-temp
           
           python3 -c "
           import os
           import shutil
           
-          # --- YOUR CONFIGURATION ---
+          # --- YOUR GEOSITE CONFIGURATION ---
           wanted_roots = [
               'category-ru',
               'category-gov-ru',
@@ -47,18 +49,20 @@ jobs:
               'yandex',
               'openai',
               'google',
+              'telegram',
+              'whatsapp',
               'category-ads-all'
           ]
-          # --------------------------
+          # ----------------------------------
 
-          source_dir = './source/data'
-          target_dir = './source/data-new'
+          source_dir = './geosite-src/data'
+          target_dir = './geosite-src/data-new'
           os.makedirs(target_dir, exist_ok=True)
 
           processed_files = set()
           queue = list(wanted_roots)
 
-          print('--- Starting Dependency Resolution ---')
+          print('--- Starting Geosite Dependency Resolution ---')
 
           while queue:
               current_file = queue.pop(0)
@@ -73,12 +77,10 @@ jobs:
 
               shutil.copy(src_path, os.path.join(target_dir, current_file))
               processed_files.add(current_file)
-              print(f'Included: {current_file}')
-
+              
               try:
                   with open(src_path, 'r', encoding='utf-8') as f:
-                      lines = f.readlines()
-                      for line in lines:
+                      for line in f:
                           line = line.strip()
                           if line.startswith('include:'):
                               dependency = line.split(':')[1].strip()
@@ -87,25 +89,84 @@ jobs:
               except Exception as e:
                   print(f'Error reading {current_file}: {e}')
 
-          print(f'--- Finished. Total files included: {len(processed_files)} ---')
+          print(f'--- Finished. Total geosite files: {len(processed_files)} ---')
           "
 
-          rm -rf ./source/data
-          mv ./source/data-new ./source/data
+          rm -rf ./geosite-src/data
+          mv ./geosite-src/data-new ./geosite-src/data
 
       - name: Build geosite.dat
         run: |
-          cd ./source
+          cd ./geosite-src
           go run ./ --outputdir=../
-        
-      - name: Rename output
-        run: mv dlc.dat geosite.dat
+          cd ..
+          mv dlc.dat geosite.dat
 
+      # =========================================================
+      # 2. BUILD GEOIP.DAT
+      # =========================================================
+      - name: Checkout v2fly/geoip
+        uses: actions/checkout@v4
+        with:
+          repository: v2fly/geoip
+          path: ./geoip-src
+
+      - name: Generate Custom GeoIP Config
+        run: |
+          # We create a config that takes Loyalsoldier's full file as INPUT,
+          # and outputs a file containing only the tags we want.
+          
+          cat > ./geoip-src/config.json <<EOF
+          {
+            "input": [
+              {
+                "type": "v2rayGeoIPDat",
+                "action": "add",
+                "args": {
+                  "uri": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
+                  "wantedList": [
+                    "ru",
+                    "google",
+                    "telegram",
+                    "private"
+                  ]
+                }
+              }
+            ],
+            "output": [
+              {
+                "type": "v2rayGeoIPDat",
+                "action": "output",
+                "args": {
+                  "outputName": "geoip.dat",
+                  "outputDir": "../"
+                }
+              }
+            ]
+          }
+          EOF
+          
+          # NOTE: 
+          # 1. 'ru' covers VK, Yandex, Avito, Mail.ru IPs.
+          # 2. 'google' is explicitly available in Loyalsoldier's list.
+          # 3. 'openai' is NOT a standard geoip tag; it will fall under US or Cloudflare IPs.
+          # 4. 'private' is good for local network exclusion.
+
+      - name: Build geoip.dat
+        run: |
+          cd ./geoip-src
+          go run ./
+          # The config outputs to ../geoip.dat, so it ends up in the root workspace
+
+      # =========================================================
+      # 3. RELEASE BOTH
+      # =========================================================
       - name: Release to GitHub
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest
-          files: geosite.dat
+          files: |
+            geosite.dat
+            geoip.dat
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: false
-          # Removed the invalid 'update_latest_release' line
