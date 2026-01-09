@@ -17,6 +17,10 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Get current date
+        id: date
+        run: echo "date=$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+
       # =========================================================
       # 1. BUILD GEOSITE.DAT
       # =========================================================
@@ -34,7 +38,7 @@ jobs:
           import os
           import shutil
           
-          # --- YOUR GEOSITE CONFIGURATION ---
+          # --- CONFIGURATION ---
           wanted_roots = [
               'category-ru',
               'category-gov-ru',
@@ -49,11 +53,9 @@ jobs:
               'yandex',
               'openai',
               'google',
-              'telegram',
-              'whatsapp',
               'category-ads-all'
           ]
-          # ----------------------------------
+          # ---------------------
 
           source_dir = './geosite-src/data'
           target_dir = './geosite-src/data-new'
@@ -62,34 +64,23 @@ jobs:
           processed_files = set()
           queue = list(wanted_roots)
 
-          print('--- Starting Geosite Dependency Resolution ---')
-
           while queue:
               current_file = queue.pop(0)
               if current_file in processed_files:
                   continue
-                  
               src_path = os.path.join(source_dir, current_file)
-              
               if not os.path.exists(src_path):
-                  print(f'WARNING: File not found: {current_file}')
                   continue
-
               shutil.copy(src_path, os.path.join(target_dir, current_file))
               processed_files.add(current_file)
-              
               try:
                   with open(src_path, 'r', encoding='utf-8') as f:
                       for line in f:
-                          line = line.strip()
-                          if line.startswith('include:'):
-                              dependency = line.split(':')[1].strip()
-                              if dependency and dependency not in processed_files:
-                                  queue.append(dependency)
-              except Exception as e:
-                  print(f'Error reading {current_file}: {e}')
-
-          print(f'--- Finished. Total geosite files: {len(processed_files)} ---')
+                          if line.strip().startswith('include:'):
+                              dep = line.strip().split(':')[1].strip()
+                              if dep and dep not in processed_files:
+                                  queue.append(dep)
+              except: pass
           "
 
           rm -rf ./geosite-src/data
@@ -113,9 +104,6 @@ jobs:
 
       - name: Generate Custom GeoIP Config
         run: |
-          # We create a config that takes Loyalsoldier's full file as INPUT,
-          # and outputs a file containing only the tags we want.
-          
           cat > ./geoip-src/config.json <<EOF
           {
             "input": [
@@ -124,12 +112,7 @@ jobs:
                 "action": "add",
                 "args": {
                   "uri": "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat",
-                  "wantedList": [
-                    "ru",
-                    "google",
-                    "telegram",
-                    "private"
-                  ]
+                  "wantedList": ["ru", "google", "telegram", "private"]
                 }
               }
             ],
@@ -145,28 +128,32 @@ jobs:
             ]
           }
           EOF
-          
-          # NOTE: 
-          # 1. 'ru' covers VK, Yandex, Avito, Mail.ru IPs.
-          # 2. 'google' is explicitly available in Loyalsoldier's list.
-          # 3. 'openai' is NOT a standard geoip tag; it will fall under US or Cloudflare IPs.
-          # 4. 'private' is good for local network exclusion.
 
       - name: Build geoip.dat
         run: |
           cd ./geoip-src
           go run ./
-          # The config outputs to ../geoip.dat, so it ends up in the root workspace
 
       # =========================================================
-      # 3. RELEASE BOTH
+      # 3. GENERATE CHECKSUMS (Fix for Passwall)
+      # =========================================================
+      - name: Generate SHA256 Checksums
+        run: |
+          sha256sum geosite.dat > geosite.dat.sha256sum
+          sha256sum geoip.dat > geoip.dat.sha256sum
+
+      # =========================================================
+      # 4. RELEASE
       # =========================================================
       - name: Release to GitHub
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: latest
+          # Use the dynamic date as the tag name (e.g., 202601091230)
+          tag_name: ${{ steps.date.outputs.date }}
           files: |
             geosite.dat
+            geosite.dat.sha256sum
             geoip.dat
+            geoip.dat.sha256sum
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: false
