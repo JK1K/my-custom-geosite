@@ -1,9 +1,13 @@
 name: Build Custom Geosite
 
 on:
-  workflow_dispatch: # Allows manual trigger
+  workflow_dispatch:
   schedule:
-    - cron: '0 5 * * 5' # Runs at 05:00 UTC every Friday
+    - cron: '0 5 * * 5'
+
+# Explicitly grant write permission to the token
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -22,16 +26,13 @@ jobs:
 
       - name: Prepare Data and Resolve Dependencies
         run: |
-          # 1. Clear the default data directory in source
           mkdir -p ./data-temp
           
-          # 2. Python script to copy only needed files AND their dependencies recursively
           python3 -c "
           import os
           import shutil
           
-          # --- YOUR CONFIGURATION HERE ---
-          # Add the exact filenames you want to keep
+          # --- YOUR CONFIGURATION ---
           wanted_roots = [
               'category-ru',
               'category-gov-ru',
@@ -48,13 +49,12 @@ jobs:
               'google',
               'category-ads-all'
           ]
-          # -------------------------------
+          # --------------------------
 
           source_dir = './source/data'
-          target_dir = './source/data-new' # We build a clean folder
+          target_dir = './source/data-new'
           os.makedirs(target_dir, exist_ok=True)
 
-          # Set to keep track of what we have already processed to avoid infinite loops
           processed_files = set()
           queue = list(wanted_roots)
 
@@ -62,7 +62,6 @@ jobs:
 
           while queue:
               current_file = queue.pop(0)
-              
               if current_file in processed_files:
                   continue
                   
@@ -72,12 +71,10 @@ jobs:
                   print(f'WARNING: File not found: {current_file}')
                   continue
 
-              # Copy the file to the new data directory
               shutil.copy(src_path, os.path.join(target_dir, current_file))
               processed_files.add(current_file)
               print(f'Included: {current_file}')
 
-              # Read file to find 'include:' directives
               try:
                   with open(src_path, 'r', encoding='utf-8') as f:
                       lines = f.readlines()
@@ -87,14 +84,12 @@ jobs:
                               dependency = line.split(':')[1].strip()
                               if dependency and dependency not in processed_files:
                                   queue.append(dependency)
-                                  print(f'  > Found dependency in {current_file}: {dependency}')
               except Exception as e:
                   print(f'Error reading {current_file}: {e}')
 
           print(f'--- Finished. Total files included: {len(processed_files)} ---')
           "
 
-          # 3. Replace the upstream data folder with our custom one
           rm -rf ./source/data
           mv ./source/data-new ./source/data
 
@@ -108,10 +103,9 @@ jobs:
 
       - name: Release to GitHub
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/') == false # Run on tagless commits (cron/dispatch)
         with:
           tag_name: latest
           files: geosite.dat
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: false
-          update_latest_release: true
+          # Removed the invalid 'update_latest_release' line
