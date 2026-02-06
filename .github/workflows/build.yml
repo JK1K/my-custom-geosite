@@ -32,12 +32,11 @@ jobs:
 
       - name: Prepare Geosite Data
         run: |
-          mkdir -p ./geosite-src/data-temp
-          
           python3 -c "
           import os
           import shutil
-          
+          import re
+
           # --- CONFIGURATION ---
           wanted_roots = [
               'category-ru',
@@ -64,25 +63,44 @@ jobs:
           processed_files = set()
           queue = list(wanted_roots)
 
+          print('--- Starting Robust Dependency Resolution ---')
+
           while queue:
               current_file = queue.pop(0)
               if current_file in processed_files:
                   continue
+              
               src_path = os.path.join(source_dir, current_file)
+              
               if not os.path.exists(src_path):
+                  print(f'  [!] Skip: {current_file} (not found in source)')
                   continue
+
               shutil.copy(src_path, os.path.join(target_dir, current_file))
               processed_files.add(current_file)
+              print(f'  [+] Copied: {current_file}')
+
               try:
                   with open(src_path, 'r', encoding='utf-8') as f:
                       for line in f:
-                          if line.strip().startswith('include:'):
-                              dep = line.strip().split(':')[1].strip()
-                              if dep and dep not in processed_files:
-                                  queue.append(dep)
-              except: pass
+                          line = line.strip()
+                          # Match 'include:filename' and ignore anything after @ or space
+                          if line.startswith('include:'):
+                              # Extract the part after 'include:'
+                              dep_part = line[8:].strip()
+                              # Split by space or @ to get only the filename
+                              # e.g., 'google @ads' -> 'google'
+                              dep_filename = re.split(r'[\s@]', dep_part)[0]
+                              
+                              if dep_filename and dep_filename not in processed_files:
+                                  queue.append(dep_filename)
+              except Exception as e:
+                  print(f'  [!] Error reading {current_file}: {e}')
+
+          print(f'--- Finished. Total files: {len(processed_files)} ---')
           "
 
+          # Swap the directories
           rm -rf ./geosite-src/data
           mv ./geosite-src/data-new ./geosite-src/data
 
@@ -135,7 +153,7 @@ jobs:
           go run ./
 
       # =========================================================
-      # 3. GENERATE CHECKSUMS (Fix for Passwall)
+      # 3. GENERATE CHECKSUMS
       # =========================================================
       - name: Generate SHA256 Checksums
         run: |
@@ -148,7 +166,6 @@ jobs:
       - name: Release to GitHub
         uses: softprops/action-gh-release@v1
         with:
-          # Use the dynamic date as the tag name (e.g., 202601091230)
           tag_name: ${{ steps.date.outputs.date }}
           files: |
             geosite.dat
