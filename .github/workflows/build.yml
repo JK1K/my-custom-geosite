@@ -167,6 +167,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ steps.date.outputs.date }}
+          name: "Release ${{ steps.date.outputs.date }}" # Sets a nice title
           files: |
             geosite.dat
             geosite.dat.sha256sum
@@ -174,3 +175,4 @@ jobs:
             geoip.dat.sha256sum
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: false
+          make_latest: true # Explicitly tells GitHub this is the new 'Latest'
