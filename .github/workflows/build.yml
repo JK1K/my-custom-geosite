@@ -52,6 +52,7 @@ jobs:
               'yandex',
               'openai',
               'google',
+              'telegram',
               'category-ads-all'
           ]
           # ---------------------
