@@ -53,7 +53,8 @@ jobs:
               'openai',
               'google',
               'telegram',
-              'category-ads-all'
+              'category-ads-all',
+              'microsoft'
           ]
           # ---------------------
 
